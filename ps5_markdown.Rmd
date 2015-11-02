@@ -1,0 +1,263 @@
+---
+geometry: margin=2.5cm
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhf{}
+- \fancyhead[L]{Neil J. Gallagher}
+- \fancyhead[R]{ECON C142}
+- \fancyfoot[R]{\thepage}
+- \usepackage{dcolumn}
+
+output: pdf_document
+
+---
+
+\setcounter{page}{1}
+
+Problem 1
+----------------------------------
+
+Let's start by importing the data file. We'll factorise the education variable to give us six different levels of education, but keep a numeric version as well.
+
+```{r}
+rm(list=ls())
+
+data <- read.csv("C:/Users/Neil/Documents/Berkeley/Fall semester/Applied Econometrics/Problem Set 5/ps5.csv")
+
+data <- data[complete.cases(data),]
+
+data$educ.num <- data$educ
+data$educ <- factor(data$educ, labels=c("HS","13","14","BA","MA","PhD"))
+```
+
+Now let's split up the data set into two subsets - group a, which contains observations from the private sector, and group b, which contains observations from the sector. Are the two groups similar on observable parameters? Let's find out.
+
+```{r, results='asis'}
+data.a <- subset(data,data$govt %in% 0)
+data.b <- subset(data,data$govt %in% 1)
+
+nrow(data.a)
+nrow(data.b)
+
+Private <- colMeans(subset(data.a, select = -c(educ)))
+Public <- colMeans(subset(data.b, select = -c(educ)))
+Public.Private.Gap <- Public-Private
+Everything <- cbind(Private,Public,Public.Private.Gap)
+
+require(stargazer)
+stargazer(Everything, summary=FALSE, title="Descriptive statistics", digits=2,align=TRUE)
+
+```
+
+We can start by noting that the majority of our data set is in the private sector - this is as expected. There are 38,533 private sector workers in our data set, and 6,851 public sector workers.
+
+Let's turn our attention to a comparison of the two groups. We can see that workers in the public sector are slightly older, but the difference is marginal. Public sector workers also have around 1 more year of education on average. But let's dive deeper into the differences in education.
+
+Comparing means for the proportions of workers with varying levels of education, we can see that the biggest difference appears among workers with only a high school education. 15 percentage points more of these workers can be found in the private sector. For all other levels of education, there is a larger proportion in the public sector (comparing the shares within the two sectors). The biggest absolute difference is for holders of a Master's degree who are almost 10 percentage points more prevalent in the public sector.
+
+Of particular interest is the difference in means for the wage. We can see that public workers earn around 21 % more than private sector workers on average. However, we have also already deduced that the public sector has a higher share of every education level above high school, and perhaps this explains some of the difference. We are interested in breaking down the 21 % and analysing what's causing the difference.
+
+Problem 2
+----------------
+
+As a first step, we might think of isolating the "effect", or at least unexplained wage gap, of being in the public sector (as if this were somehow exogenous), by running some regressions. Let's throw in some of the variables we think might be relevant (coincidentally, also the only variables we have available). We're only interested in comparing the coefficient for being in the public sector, so let's disregard the rest of them.
+
+```{r, results='asis'}
+
+reg_a <- lm(logwage ~ govt , data=data)
+reg_b <- lm(logwage ~ govt + educ.num, data=data)
+reg_c <- lm(logwage ~ govt + factor(educ), data=data)
+reg_d <- lm(logwage ~ govt + age + factor(educ), data=data)
+reg_e <- lm(logwage ~ govt + factor(age) +factor(educ), data=data)
+
+govt_coefficients <- cbind(coef(summary(reg_a))["govt","Estimate"],
+coef(summary(reg_b))["govt","Estimate"],coef(summary(reg_c))["govt","Estimate"]
+ ,coef(summary(reg_d))["govt","Estimate"], coef(summary(reg_e))["govt","Estimate"])
+
+colnames(govt_coefficients) <- c("Regression a",
+              "Regression b","Regression c","Regression d","Regression e")
+
+stargazer(govt_coefficients,align=TRUE,no.space=TRUE, 
+        notes=NULL, table.placement="htbp", title="Govt coefficients")
+```
+
+Unsurprisingly, regression a, which includes no additional explanatory variables, just gives us the difference in means which we already knew about - 21 %. When we include education as a numeric (linear) variable, we can see that the coefficient is roughly halved - a lot of the difference might be due to education differences. However, including education as a categorical variable is probably smarter, so we do that in regression c. We forgot to include age, so let's do that in regression d. We can see that including age slightly lessens the wage gap, but the difference is marginal. This makes sense - after all, the mean ages were almost identical in both sectors. Again, wages probably aren't a linear function of age, so let's categorise that too in regression e.
+
+Regression e looks reasonable. It tells us that, accounting for education and age, workers in the public sector are paid around 10.3 % more on average. Whether this can be interpreted as them being "overpaid" depends on your agenda, but certainly the difference isn't immediately explained by age or education.
+
+So, we've done the best we can with the data at hand, right? Perhaps not. We haven't accounted for the fact that the distribution among levels of education differs between the two groups. Had public sector workers been distributed with levels of education similar to the private sector, then the wage gaps for the various levels of education would have had a different influence on the aggregate result. As it is, the wage gaps of the relatively common education levels in the public sector are given more influence on the average wage gap than the relatively less prevalent levels of education. If we were to imagine the hypothetical scenario where the public sector workers were redistributed in the private sector the results would differ, as the weighted average of wage gaps would change. We would have to attribute far more weight to the high school wage gap, for example, as we know there are relatively few of them in the public sector.
+
+So, in the following few problems, we even it up a bit, and see what the difference would have looked like had the distribution been the same in both sectors. (It's unclear whether this is a good idea - the distribution is hardly exogenous, and is almost certainly affected by the wage itself, but let's abstract from that.)
+
+Problem 3
+-------
+
+Before we consider reweighting, though, let's start by isolating the differences in wages for every education group in both sectors. In fact, if the wage gap is identical (or very similar) for all levels of education, then there is no point reweighting.
+
+
+```{r, results='asis'}
+x.a <- model.matrix(~educ +0, data=data.a)
+x.b <- model.matrix(~educ +0, data=data.b)
+
+xbar.a <- apply(x.a,2,mean)
+xbar.b <- apply(x.b,2,mean)
+
+ybar.educ.a <- tapply(data.a$logwage,data.a$educ,mean)
+ybar.educ.b <- tapply(data.b$logwage,data.b$educ,mean)
+educ.wage.gap <- ybar.educ.b-ybar.educ.a
+
+dist <- cbind(ybar.educ.a,xbar.a,ybar.educ.b,xbar.b, educ.wage.gap)
+stargazer(dist, summary=FALSE, align=TRUE, no.space=TRUE)
+```
+
+The "average" gap was 21 %, but we can now see that this conceals significant variation among the education groups. In fact, private sector workers with a Master's degree or a PhD actually get paid more than their public sector counterparts.
+
+The three other education groups are pulling the average down, so for lower levels of education, the public sector workers earn a lot more than the private sector comparison.
+
+Problem 4.a
+-------------
+
+Now, first, let's regress wages on education with no constant. We expect that our regressions should "fit the mean" for every level of education.
+
+```{r, results='asis'}
+lm.a <- lm(logwage ~ educ + 0, data=data.a)
+lm.b <- lm(logwage ~ educ + 0, data=data.b)
+
+col
+
+ybar.educ.comp <- cbind(ybar.educ.a,coefficients(lm.a),ybar.educ.b, coefficients(lm.b))
+
+colnames(ybar.educ.comp) <- c("Mean wages - a","Regression coefficients - a"
+                    ,"Mean wages group - b","Regression coefficients - b")
+
+stargazer(ybar.educ.comp,align=TRUE)
+```
+
+By comparing the coefficients with the means we calculated previously, we can see that they are exactly the same. Good.
+
+Problem 4.b
+--------
+
+Using these coefficients, we can compute a weighted average for the mean wage of the entire sector, using the distribution of education in each sector. Let's compare this to the true means, to make sure we're doing things correctly.
+
+```{r, results='asis'}
+
+ybar.a.hat <- xbar.a %*% coefficients(lm.a)
+ybar.b.hat <- xbar.b %*% coefficients(lm.b)
+colnames(ybar.a.hat)[1] <- "ybar.a.hat"
+colnames(ybar.b.hat)[1] <- "ybar.b.hat"
+
+ybar.a <- mean(data.a$logwage)
+ybar.b <- mean(data.b$logwage)
+
+ybar.comp <- cbind(ybar.a,ybar.a.hat,ybar.b,ybar.b.hat)
+stargazer(ybar.comp,align=TRUE)
+```
+
+They match up. Great, let's move on.
+
+Problem 4.c
+-----------
+
+Now, we can construct the counterfactual we have been talking about. What would the wage gap look like, if the public sector had the same education distribution as the private sector? We can combine the actual wages of group b with the distribution of group a to answer this question.
+
+```{r}
+ybar.b.counter <- xbar.a %*% coefficients(lm.b)
+
+full.gap <- ybar.b - ybar.a
+adj.gap <- ybar.b.counter - ybar.a
+
+full.gap
+adj.gap
+```
+
+So, the "adjusted" wage gap, where we have rearranged the workers in the public sector so they resemble the private sector, is smaller than the actual wage gap. This tells us that some of the difference was due to the fact that public sector workers were relatively over-represented in the high wage gap groups (or under-represented in low wage gap groups). Again, this seems unlikely to be an exogenous distribution, but we'll ignore that.
+
+In the hypothetical scenario where they were evenly distributed in both sectors, the wage gap has fallen to 15 %. We have "explained" 7 percentage points of the gap by the education distribution.
+
+The explained gap, in mathematical terms, is then the difference due to differences in proportions among the sectors, weighted by the relevance of the wage gap at each level of education.
+
+```{r}
+exp.gap <- (xbar.b-xbar.a) %*% coefficients(lm.b)
+full.gap.hat <- adj.gap + exp.gap
+
+exp.gap
+full.gap.hat
+```
+
+
+Problem 4.d
+----------------
+
+How else could we compute this counterfactual wage gap? Instead of reweighting the means within groups, we could reweight every observation. For every public sector observation, the wage must be weighted by its under-representation relative to the private sector. So if an observation is, for example, from the high school group, we know that there are relatively few of these wage observations to work with (relative to the private sector). So each one is weighted by the difference in population size between the two sectors for each education group. Since we have many more private sector observations than public sector, all the public sector observations will be weighted greater than 1. What is relevant for the reweighting, however, is whether the weight is above or below 38,553/6851=5.63, which is the baseline "average" reweight, and differences relative to this tell us whether a group is over- or under-represented in the public sector.
+
+```{r}
+yn.educ.a <- nrow(data.a)*xbar.a
+yn.educ.b <- nrow(data.b)*xbar.b
+weight <- yn.educ.a/yn.educ.b
+
+colSums(x.b %*% weight * data.b$logwage)/colSums(x.b %*% weight)
+ybar.b.counter
+```
+
+Luckily, this method, which followed the same intuition as before, gives us the same result for the counterfactual wage gap.
+
+Problem 4.e
+----------------
+
+We can construct these individual weights in a third way - by running a regression on all of the pooled data, determining the relative likelihood of an observation being in the private sector for each level of education.
+
+```{r}
+data$priv <- ifelse(data$govt==1,0,1)
+crazy <- lm(priv~factor(educ)+0,data=data)
+```
+
+Intuitively, the coefficient will be high for groups that are under-represented in the public sector, as these observations are very likely to be in the private sector. The predicted value will then be closer to 1 for these groups, but we want to weight these observations the most. To do this, we can use the following formula. For workers in the private sector, every observation only needs to be counted once - we're not trying to reweight them.
+
+```{r}
+crazy.weights <- crazy$fitted.values/(1-crazy$fitted.values) 
+data.weights <- cbind(data,crazy.weights)
+data.weights$crazy.weights <- ifelse(data$priv==1,1,data.weights$crazy.weights)
+```
+
+Now, let's run a regression of wages on public sector participation, weighting the observations to reflect their value in determining the adjusted wage gap.
+
+```{r}
+weighted.reg <- lm(logwage ~ govt, data=data.weights, weights=crazy.weights)
+coefficients(weighted.reg)
+```
+
+The coefficient for govt is 0.15, telling us that public sector workers are paid 15 % more, where we have corrected for the education distribution. This corresponds exactly to the adjusted wage gap we have already found a couple of times.
+
+Problem 4.f
+----------------
+
+We can test whether the weights are doing their job correctly by checking how the covariates are weighted. This is essentially exactly what the previous regression did for us. We want the covariates to be weighted equally in both sectors.
+
+To check this, we can isolate the public sector observations, and weight each dummy by its relevance in determining the adjusted wage gap. We know that the average of these weighted covariates should produce the same average covariates as in the private sector - the point was to mimic that distribution.
+
+```{r}
+group.b <- subset(data.weights,data.weights$govt %in% 1)
+weighted.x.b <- group.b$crazy.weights*x.b
+colSums(weighted.x.b)/sum(weighted.x.b)
+
+xbar.a
+```
+
+The reweighted average public sector covariates are identical to the average covariates in the private sector. Perfect.
+
+Problem 4.g
+----------------
+
+As a final way of calculating the weights, we could have used a logit model instead of the OLS. The idea is the same, and, given how logit calculates coefficients (it fits the means for dummy variables), we would expect the same coefficients, and thereby the same weights. Let's check.
+
+```{r}
+crazy.logit <- glm(priv~factor(educ)+0,data=data,family = binomial(link = "logit"))
+crazy.logit.weights <- crazy.logit$fitted.values/(1-crazy.logit$fitted.values)
+diff.in.weights  <- crazy.weights-crazy.logit.weights
+
+sum(diff.in.weights)
+```
+
+Well, unluckily, it seems there is a slight difference in the weights compared to the OLS, but across 45,000 observations, 0.01 doesn't seem like much. I'm putting this down to an r algorithm which rounds off numbers or takes a shortcut in a calculation. Perhaps the ML didn't find the very top of the parable. However, in principle, these two vectors are exactly the same.
